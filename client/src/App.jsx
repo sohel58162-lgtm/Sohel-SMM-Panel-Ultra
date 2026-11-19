@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   LayoutDashboard,
   PlusCircle,
@@ -13,14 +13,13 @@ import {
   Menu,
   X,
   ArrowUpRight,
-  CheckCircle2,
-  CircleSlash,
   RefreshCw,
   ShieldCheck,
 } from "lucide-react";
 import "./style.css";
 
 const API = (import.meta.env.VITE_API_URL || "http://localhost:4000").replace(/\/$/, "");
+const TOKEN_KEY = "sohel_smm_token";
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -84,6 +83,14 @@ function money(value) {
   }).format(Number(value || 0));
 }
 
+function getUserLabel(user) {
+  return user?.displayName || user?.display_name || user?.email || "User";
+}
+
+function normalizeRole(role) {
+  return String(role || "user").trim().toLowerCase() === "admin" ? "admin" : "user";
+}
+
 async function apiFetch(path, { token, options = {} } = {}) {
   const headers = {
     ...(options.body ? { "Content-Type": "application/json" } : {}),
@@ -103,8 +110,104 @@ async function apiFetch(path, { token, options = {} } = {}) {
   return data;
 }
 
-function normalizeRole(role) {
-  return String(role || "user").toLowerCase() === "admin" ? "admin" : "user";
+function AuthScreen({ onAuthSuccess }) {
+  const [mode, setMode] = useState("login");
+  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErrorMsg("");
+    setLoading(true);
+
+    try {
+      const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
+      const payload =
+        mode === "login"
+          ? { email: email.trim(), password }
+          : { displayName: displayName.trim(), email: email.trim(), password };
+
+      const data = await apiFetch(endpoint, {
+        options: {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      });
+
+      const resolvedUser = data.user || data;
+      onAuthSuccess(data.token, resolvedUser);
+    } catch (err) {
+      setErrorMsg(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-card">
+        <h1>SOHEL MEDIA PANEL</h1>
+        <p>{mode === "login" ? "Sign in to your account" : "Create a new account"}</p>
+
+        {errorMsg && <div className="alert error">{errorMsg}</div>}
+
+        <form onSubmit={handleSubmit} className="form-grid">
+          {mode === "register" && (
+            <label>
+              <span>Display Name</span>
+              <input
+                type="text"
+                placeholder="Your name"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                required
+              />
+            </label>
+          )}
+
+          <label>
+            <span>Email</span>
+            <input
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
+          </label>
+
+          <label>
+            <span>Password</span>
+            <input
+              type="password"
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+          </label>
+
+          <button className="btn btn-primary" type="submit" disabled={loading}>
+            {loading ? "Please wait..." : mode === "login" ? "Login" : "Register"}
+          </button>
+        </form>
+
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => {
+            setErrorMsg("");
+            setMode(mode === "login" ? "register" : "login");
+          }}
+        >
+          {mode === "login" ? "Need an account? Register" : "Already have an account? Login"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function AdminDashboard({
@@ -130,11 +233,12 @@ function AdminDashboard({
       setLoadingAdmin(true);
       try {
         const res = await apiFetch("/api/admin/users", { token });
-        if (active && Array.isArray(res.users)) {
-          setUsersList(res.users);
+        const list = Array.isArray(res) ? res : res?.users;
+        if (active && Array.isArray(list)) {
+          setUsersList(list);
         }
       } catch {
-        // अगर backend route मौजूद नहीं है तो empty/fallback list रहने दें
+        // Fallback if endpoint is unavailable
       } finally {
         if (active) setLoadingAdmin(false);
       }
@@ -220,7 +324,7 @@ function AdminDashboard({
 
         <div className="sidebar-footer">
           <div className="user-chip">
-            <strong>{user?.displayName || user?.email}</strong>
+            <strong>{getUserLabel(user)}</strong>
             <span>Role: ADMIN</span>
           </div>
           <button className="btn btn-ghost" onClick={onLogout}>
@@ -237,7 +341,7 @@ function AdminDashboard({
           </button>
           <div>
             <h1>Admin Dashboard</h1>
-            <p>Welcome back, {user?.displayName || "Admin"} (Admin Controls)</p>
+            <p>Welcome back, {getUserLabel(user)} (Admin Controls)</p>
           </div>
           <button className="btn btn-secondary" onClick={onRefresh}>
             <RefreshCw size={16} />
@@ -302,7 +406,9 @@ function AdminDashboard({
                             <option value="pending">pending</option>
                             <option value="processing">processing</option>
                             <option value="completed">completed</option>
+                            <option value="partial">partial</option>
                             <option value="cancelled">cancelled</option>
+                            <option value="failed">failed</option>
                           </select>
                         </td>
                       </tr>
@@ -338,8 +444,8 @@ function AdminDashboard({
                     orders.map((ord) => (
                       <tr key={ord.id}>
                         <td>#{ord.id}</td>
-                        <td>{ord.user_email || ord.user_id || "-"}</td>
-                        <td>{ord.target || "-"}</td>
+                        <td>{ord.email || ord.user_email || ord.user_id || "-"}</td>
+                        <td>{ord.target_url || ord.target || "-"}</td>
                         <td>{ord.quantity}</td>
                         <td>{money(ord.amount)}</td>
                         <td>{ord.status}</td>
@@ -372,14 +478,14 @@ function AdminDashboard({
                     {usersList.length === 0 ? (
                       <tr>
                         <td colSpan="4">
-                          {user?.email} ({user?.role || "admin"})
+                          {user?.email} ({normalizeRole(user?.role).toUpperCase()})
                         </td>
                       </tr>
                     ) : (
                       usersList.map((u) => (
                         <tr key={u.id || u.email}>
                           <td>{u.id || "-"}</td>
-                          <td>{u.displayName || u.display_name || "-"}</td>
+                          <td>{getUserLabel(u)}</td>
                           <td>{u.email}</td>
                           <td>{normalizeRole(u.role)}</td>
                         </tr>
@@ -411,7 +517,7 @@ function AdminDashboard({
                       <td>#{srv.id}</td>
                       <td>{srv.name}</td>
                       <td>{srv.category}</td>
-                      <td>{money(srv.price)}</td>
+                      <td>{money(srv.price ?? srv.unit_price)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -457,7 +563,7 @@ function UserDashboard({
   );
 
   const estimatedPrice = useMemo(() => {
-    const unitPrice = Number(selectedService?.price || 0);
+    const unitPrice = Number(selectedService?.price ?? selectedService?.unit_price ?? 0);
     const qty = Number(quantity || 0);
     return unitPrice * qty;
   }, [selectedService, quantity]);
@@ -488,6 +594,7 @@ function UserDashboard({
           method: "POST",
           body: JSON.stringify({
             serviceId: Number(selectedService.id),
+            targetUrl: target.trim(),
             target: target.trim(),
             quantity: qty,
           }),
@@ -538,7 +645,7 @@ function UserDashboard({
 
         <div className="sidebar-footer">
           <div className="user-chip">
-            <strong>{user?.displayName || user?.email}</strong>
+            <strong>{getUserLabel(user)}</strong>
             <span>Balance: {money(balance)}</span>
           </div>
           <button className="btn btn-ghost" onClick={onLogout}>
@@ -555,101 +662,10 @@ function UserDashboard({
           </button>
           <div>
             <h1>User Dashboard</h1>
-            <p>Welcome, {user?.displayName || user?.email}</p>
+            <p>Welcome, {getUserLabel(user)}</p>
           </div>
           <div className="balance-pill">Balance: {money(balance)}</div>
         </header>
 
         {feedback && <div className="alert success">{feedback}</div>}
-        {errorMsg && <div className="alert error">{errorMsg}</div>}
-
-        {activeTab === "dashboard" && (
-          <>
-            <section className="stats-grid">
-              <div className="stat-card">
-                <span>Wallet Balance</span>
-                <strong>{money(balance)}</strong>
-              </div>
-              <div className="stat-card">
-                <span>Total Orders</span>
-                <strong>{orders.length}</strong>
-              </div>
-              <div className="stat-card">
-                <span>Services Available</span>
-                <strong>{services.length}</strong>
-              </div>
-              <div className="stat-card">
-                <span>Account Type</span>
-                <strong>USER</strong>
-              </div>
-            </section>
-
-            <section className="card">
-              <h2>Recent Orders</h2>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Service</th>
-                      <th>Quantity</th>
-                      <th>Total</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orders.length === 0 ? (
-                      <tr>
-                        <td colSpan="5">No orders placed yet.</td>
-                      </tr>
-                    ) : (
-                      orders.slice(0, 5).map((ord) => (
-                        <tr key={ord.id}>
-                          <td>#{ord.id}</td>
-                          <td>{ord.service_name || `Service #${ord.service_id}`}</td>
-                          <td>{ord.quantity}</td>
-                          <td>{money(ord.amount)}</td>
-                          <td>{ord.status}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </>
-        )}
-
-        {activeTab === "new-order" && (
-          <section className="card">
-            <h2>Place New Order</h2>
-            <form onSubmit={placeOrder} className="form-grid">
-              <label>
-                <span>Service</span>
-                <select
-                  value={serviceId}
-                  onChange={(e) => {
-                    const nextId = Number(e.target.value);
-                    setServiceId(nextId);
-                    const found = services.find((s) => Number(s.id) === nextId);
-                    if (found) setQuantity(found.min_quantity || 1);
-                  }}
-                >
-                  {services.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} — {money(s.price)} / {s.unit || "unit"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span>Target Link / Username</span>
-                <input
-                  type="text"
-                  placeholder="https://instagram.com/yourhandle"
-                  value={target}
-                  onChange={(e) => setTarget(e.target.value)}
-                  required
-                />
- 
+        {errorMsg && <div className="ale
