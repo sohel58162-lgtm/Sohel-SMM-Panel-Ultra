@@ -1,671 +1,393 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  LayoutDashboard,
-  PlusCircle,
-  ShoppingBag,
-  Layers,
-  Wallet,
-  Headset,
-  Users,
-  Code2,
-  Settings,
-  LogOut,
-  Menu,
-  X,
-  ArrowUpRight,
-  RefreshCw,
-  ShieldCheck,
-} from "lucide-react";
-import "./style.css";
+import { LayoutDashboard, PlusCircle, ShoppingBag, Layers, Wallet, Headset, Users, Code2, Settings, LogOut, Menu, X, ArrowUpRight, RefreshCw, ShieldCheck from 'lucide-react';
+import './style.css';
 
-const API = (import.meta.env.VITE_API_URL || "http://localhost:4000").replace(/\/$/, "");
-const TOKEN_KEY = "sohel_smm_token";
+const API = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
+const TOKEN_KEY = 'sohel_smm_token';
 
-const navItems = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "new-order", label: "New Order", icon: PlusCircle },
-  { id: "orders", label: "Orders", icon: ShoppingBag },
-  { id: "services", label: "Services", icon: Layers },
-  { id: "add-funds", label: "Add Funds", icon: Wallet },
-  { id: "support", label: "Support", icon: Headset },
-  { id: "api", label: "API", icon: Code2 },
-  { id: "settings", label: "Settings", icon: Settings },
+const navItemsAdmin = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'users', label: 'Users', icon: Users },
+  { id: 'services', label: 'Services', icon: Layers },
+  { id: 'orders', label: 'Orders', icon: ShoppingBag },
+  { id: 'add-funds', label: 'Add Funds', icon: Wallet },
+  { id: 'api', label: 'API Integration', icon: Code2 },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
-const demoServices = [
-  {
-    id: 1,
-    name: "Social media content audit",
-    category: "Consulting",
-    description: "Review public-facing content and provide improvement recommendations.",
-    unit: "audit",
-    price: 299,
-    min_quantity: 1,
-    max_quantity: 50,
-  },
-  {
-    id: 2,
-    name: "Content calendar setup",
-    category: "Content Planning",
-    description: "A tailored content calendar for a brand or creator.",
-    unit: "month",
-    price: 499,
-    min_quantity: 1,
-    max_quantity: 12,
-  },
-  {
-    id: 3,
-    name: "Profile optimisation review",
-    category: "Consulting",
-    description: "Recommendations for profile clarity and conversion.",
-    unit: "review",
-    price: 199,
-    min_quantity: 1,
-    max_quantity: 50,
-  },
-  {
-    id: 4,
-    name: "Campaign reporting setup",
-    category: "Analytics",
-    description: "A reporting template for compliant marketing reporting.",
-    unit: "setup",
-    price: 399,
-    min_quantity: 1,
-    max_quantity: 20,
-  },
+const navItemsUser = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'new-order', label: 'New Order', icon: PlusCircle },
+  { id: 'orders', label: 'Orders', icon: ShoppingBag },
+  { id: 'add-funds', label: 'Add Funds', icon: Wallet },
+  { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
-function money(value) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 2,
-  }).format(Number(value || 0));
-}
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [services, setServices] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [balance, setBalance] = useState(0);
 
-function getUserLabel(user) {
-  return user?.displayName || user?.display_name || user?.email || "User";
-}
+  const fetchProtectedData = useCallback(async (currentToken) => {
+    if (!currentToken) return;
+    try {
+      const [servicesRes, ordersRes, walletRes] = await Promise.all([
+        fetch(`${API}/api/services`, { headers: { Authorization: `Bearer ${currentToken}` } }),
+        fetch(`${API}/api/orders`, { headers: { Authorization: `Bearer ${currentToken}` } }),
+        fetch(`${API}/api/wallet`, { headers: { Authorization: `Bearer ${currentToken}` } })
+      ]);
+      if (servicesRes.ok) setServices(await servicesRes.json());
+      if (ordersRes.ok) setOrders(await ordersRes.json());
+      if (walletRes.ok) {
+        const wData = await walletRes.json();
+        setBalance(Number(wData.balance || 0));
+      }
+    } catch (err) {
+      console.error('Failed to fetch protected data:', err);
+    }
+  }, []);
 
-function normalizeRole(role) {
-  return String(role || "user").trim().toLowerCase() === "admin" ? "admin" : "user";
-}
+  const checkSession = useCallback(async (currentToken) => {
+    if (!currentToken) {
+      setSessionLoading(false);
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${currentToken}` }
+      });
+      if (res.ok) {
+        const userData = await res.json();
+        setUser(userData);
+        fetchProtectedData(currentToken);
+      } else {
+        localStorage.removeItem(TOKEN_KEY);
+        setToken(null);
+      }
+    } catch (err) {
+      console.error('Session check failed:', err);
+    } finally {
+      setSessionLoading(false);
+    }
+  }, [fetchProtectedData]);
 
-async function apiFetch(path, { token, options = {} } = {}) {
-  const headers = {
-    ...(options.body ? { "Content-Type": "application/json" } : {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...options.headers,
+  useEffect(() => {
+    if (token) {
+      checkSession(token);
+    } else {
+      setSessionLoading(false);
+    }
+  }, [token, checkSession]);
+
+  const handleLogout = () => {
+    localStorage.removeItem(TOKEN_KEY);
+    setToken(null);
+    setUser(null);
   };
 
-  const response = await fetch(`${API}${path}`, {
-    ...options,
-    headers,
-  });
+  const getUserLabel = (u) => u?.displayName || u?.email || 'User';
 
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.error || `Request failed (${response.status})`);
+  const normalizeRole = (role) => String(role || '').trim().toLowerCase() === 'admin' ? 'admin' : 'user';
+
+  if (sessionLoading) {
+    return (
+      <div className="auth-shell">
+        <div className="auth-card">
+          <p>Loading session...</p>
+        </div>
+      </div>
+    );
   }
-  return data;
+
+  if (!user) {
+    return <AuthScreen onLoginSuccess={(t, u) => { setToken(t); setUser(u); fetchProtectedData(t); }} api={API} tokenKey={TOKEN_KEY} />;
+  }
+
+  const isAdmin = normalizeRole(user?.role) === 'admin';
+  const navItems = isAdmin ? navItemsAdmin : navItemsUser;
+
+  return (
+    <div className="app-shell">
+      <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
+        <div className="sidebar-header">
+          <span>{isAdmin ? 'ADMIN PANEL' : 'SOHEL SMM PANEL'}</span>
+          <button className="icon-btn mobile-only" onClick={() => setMenuOpen(false)}>
+            <X size={20} />
+          </button>
+        </div>
+        <nav className="nav-list">
+          {navItems.map((item) => {
+            const IconComponent = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                className={`nav-item ${isActive ? 'active' : ''}`}
+                onClick={() => { setActiveTab(item.id); setMenuOpen(false); }}
+              >
+                <IconComponent size={18} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+        <div className="sidebar-footer">
+          <div className="user-chip">
+            <strong>{getUserLabel(user)}</strong>
+            <span>Balance: ₹{balance.toFixed(2)}</span>
+          </div>
+          <button className="btn btn-ghost" onClick={handleLogout}>
+            <LogOut size={16} />
+            <span>Logout</span>
+          </button>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <header className="topbar">
+          <button className="icon-btn mobile-only" onClick={() => setMenuOpen(true)}>
+            <Menu size={20} />
+          </button>
+          <div className="breadcrumb">
+            <h1 className="user-heading">{activeTab.replace('-', ' ').toUpperCase()}</h1>
+          </div>
+          <div className="balance-pill">
+            <span>Balance: ₹{balance.toFixed(2)}</span>
+          </div>
+        </header>
+
+        <section className="content-pad">
+          {isAdmin ? (
+            <AdminDashboard
+              user={user}
+              services={services}
+              orders={orders}
+              balance={balance}
+              api={API}
+              token={token}
+              onRefresh={() => fetchProtectedData(token)}
+            />
+          ) : (
+            <UserDashboard
+              user={user}
+              services={services}
+              orders={orders}
+              balance={balance}
+              api={API}
+              token={token}
+              onOrderPlaced={() => fetchProtectedData(token)}
+            />
+          )}
+        </section>
+      </main>
+    </div>
+  );
 }
 
-function AuthScreen({ onAuthSuccess }) {
-  const [mode, setMode] = useState("login");
-  const [displayName, setDisplayName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+function AuthScreen({ onLoginSuccess, api }) {
+  const [mode, setMode] = useState('login');
+  const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [errorMsg, setErrorMsg] = useState('');
 
-  async function handleSubmit(e) {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setErrorMsg("");
     setLoading(true);
+    setErrorMsg('');
+    const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
+    const payload = mode === 'login'
+      ? { email: email.trim(), password }
+      : { displayName: displayName.trim(), email: email.trim(), password };
 
     try {
-      const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/register";
-      const payload =
-        mode === "login"
-          ? { email: email.trim(), password }
-          : { displayName: displayName.trim(), email: email.trim(), password };
-
-      const data = await apiFetch(endpoint, {
-        options: {
-          method: "POST",
-          body: JSON.stringify(payload),
-        },
+      const res = await fetch(`${api}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
       });
-
-      const resolvedUser = data.user || data;
-      onAuthSuccess(data.token, resolvedUser);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Operation failed');
+      localStorage.setItem(TOKEN_KEY, data.token);
+      onLoginSuccess(data.token, data.user);
     } catch (err) {
       setErrorMsg(err.message);
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   return (
     <div className="auth-shell">
       <div className="auth-card">
-        <h1>SOHEL MEDIA PANEL</h1>
-        <p>{mode === "login" ? "Sign in to your account" : "Create a new account"}</p>
-
+        <h1>SOHEL SMM PANEL</h1>
+        <p>{mode === 'login' ? 'Sign in to your account' : 'Create a new account'}</p>
         {errorMsg && <div className="alert error">{errorMsg}</div>}
-
-        <form onSubmit={handleSubmit} className="form-grid">
-          {mode === "register" && (
+        <form onSubmit={handleSubmit}>
+          {mode === 'register' && (
             <label>
               <span>Display Name</span>
-              <input
-                type="text"
-                placeholder="Your name"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                required
-              />
+              <input type="text" placeholder="Your Name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} required />
             </label>
           )}
-
           <label>
             <span>Email</span>
-            <input
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
+            <input type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} required />
           </label>
-
           <label>
             <span>Password</span>
-            <input
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
+            <input type="password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} required />
           </label>
-
-          <button className="btn btn-primary" type="submit" disabled={loading}>
-            {loading ? "Please wait..." : mode === "login" ? "Login" : "Register"}
+          <button type="submit" disabled={loading} className="btn btn-primary primary-bg">
+            {loading ? 'Please wait...' : (mode === 'login' ? 'Login' : 'Register')}
           </button>
         </form>
-
-        <button
-          type="button"
-          className="btn btn-ghost"
-          onClick={() => {
-            setErrorMsg("");
-            setMode(mode === "login" ? "register" : "login");
-          }}
-        >
-          {mode === "login" ? "Need an account? Register" : "Already have an account? Login"}
+        <button type="button" className="btn btn-ghost" onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setErrorMsg(''); }}>
+          {mode === 'login' ? "Need an account? Register" : "Already have an account? Login"}
         </button>
       </div>
     </div>
   );
 }
 
-function AdminDashboard({
-  user,
-  token,
-  orders,
-  services,
-  balance,
-  onRefresh,
-  onLogout,
-  menuOpen,
-  setMenuOpen,
-}) {
-  const [adminTab, setAdminTab] = useState("overview");
-  const [usersList, setUsersList] = useState([]);
-  const [loadingAdmin, setLoadingAdmin] = useState(false);
-  const [adminMessage, setAdminMessage] = useState("");
+function AdminDashboard({ user, services, orders, api, token }) {
+  const [newServiceName, setNewServiceName] = useState('');
+  const [newServiceCategory, setNewServiceCategory] = useState('');
+  const [newServicePrice, setNewServicePrice] = useState('10');
+  const [actionLoading, setActionLoading] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    async function loadAdminUsers() {
-      if (!token) return;
-      setLoadingAdmin(true);
-      try {
-        const res = await apiFetch("/api/admin/users", { token });
-        const list = Array.isArray(res) ? res : res?.users;
-        if (active && Array.isArray(list)) {
-          setUsersList(list);
-        }
-      } catch {
-        // Fallback if endpoint is unavailable
-      } finally {
-        if (active) setLoadingAdmin(false);
-      }
-    }
-    loadAdminUsers();
-    return () => {
-      active = false;
-    };
-  }, [token]);
-
-  async function handleOrderStatusChange(orderId, status) {
-    setAdminMessage("");
+  const handleAddService = async (e) => {
+    e.preventDefault();
+    setActionLoading(true);
     try {
-      await apiFetch(`/api/admin/orders/${orderId}/status`, {
-        token,
-        options: {
-          method: "PATCH",
-          body: JSON.stringify({ status }),
-        },
+      const res = await fetch(`${api}/api/services`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          name: newServiceName,
+          category: newServiceCategory,
+          price: Number(newServicePrice),
+          unit: '1,000',
+          min_quantity: 100,
+          max_quantity: 100000
+        })
       });
-      setAdminMessage(`Order #${orderId} status updated to ${status}.`);
-      await onRefresh();
+      if (!res.ok) throw new Error('Failed to add service');
+      setNewServiceName('');
+      setNewServiceCategory('');
+      alert('Service added!');
     } catch (err) {
-      setAdminMessage(err.message);
+      alert(err.message);
+    } finally {
+      setActionLoading(false);
     }
-  }
+  };
 
   return (
-    <div className="app-shell">
-      <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
-        <div className="sidebar-header">
-          <div className="brand">
-            <ShieldCheck size={20} />
-            <span>SOHEL ADMIN PANEL</span>
-          </div>
-          <button className="icon-btn mobile-only" onClick={() => setMenuOpen(false)}>
-            <X size={18} />
-          </button>
+    <div className="dashboard-grid">
+      <div className="stat-card accent-border">
+        <h2>System Overview</h2>
+        <p>Welcome back, Admin {user?.displayName}. You have full control over the platform.</p>
+        <div className="stats-row">
+          <div><strong>{services.length}</strong><span>Services</span></div>
+          <div><strong>{orders.length}</strong><span>Total Orders</span></div>
         </div>
+      </div>
 
-        <nav className="nav-list">
-          <button
-            className={`nav-item ${adminTab === "overview" ? "active" : ""}`}
-            onClick={() => {
-              setAdminTab("overview");
-              setMenuOpen(false);
-            }}
-          >
-            <LayoutDashboard size={18} />
-            <span>Admin Overview</span>
+      <div className="admin-console">
+        <h3>Admin Management Tools</h3>
+        <form onSubmit={handleAddService} className="admin-form">
+          <h4>Add New Service</h4>
+          <label><span>Service Name</span><input type="text" placeholder="e.g. Instagram Followers" value={newServiceName} onChange={(e) => setNewServiceName(e.target.value)} required /></label>
+          <label><span>Category</span><input type="text" placeholder="e.g. Social Media Marketing" value={newServiceCategory} onChange={(e) => setNewServiceCategory(e.target.value)} required /></label>
+          <label><span>Price per 1,000</span><input type="number" step="0.01" value={newServicePrice} onChange={(e) => setNewServicePrice(e.target.value)} required /></label>
+          <button type="submit" disabled={actionLoading} className="btn primary-bg">
+            {actionLoading ? 'Adding...' : 'Add Service'}
           </button>
-          <button
-            className={`nav-item ${adminTab === "orders" ? "active" : ""}`}
-            onClick={() => {
-              setAdminTab("orders");
-              setMenuOpen(false);
-            }}
-          >
-            <ShoppingBag size={18} />
-            <span>All Orders ({orders.length})</span>
-          </button>
-          <button
-            className={`nav-item ${adminTab === "users" ? "active" : ""}`}
-            onClick={() => {
-              setAdminTab("users");
-              setMenuOpen(false);
-            }}
-          >
-            <Users size={18} />
-            <span>Users</span>
-          </button>
-          <button
-            className={`nav-item ${adminTab === "services" ? "active" : ""}`}
-            onClick={() => {
-              setAdminTab("services");
-              setMenuOpen(false);
-            }}
-          >
-            <Layers size={18} />
-            <span>Services ({services.length})</span>
-          </button>
-        </nav>
-
-        <div className="sidebar-footer">
-          <div className="user-chip">
-            <strong>{getUserLabel(user)}</strong>
-            <span>Role: ADMIN</span>
-          </div>
-          <button className="btn btn-ghost" onClick={onLogout}>
-            <LogOut size={16} />
-            <span>Logout</span>
-          </button>
-        </div>
-      </aside>
-
-      <main className="main-content">
-        <header className="topbar">
-          <button className="icon-btn mobile-only" onClick={() => setMenuOpen(true)}>
-            <Menu size={20} />
-          </button>
-          <div>
-            <h1>Admin Dashboard</h1>
-            <p>Welcome back, {getUserLabel(user)} (Admin Controls)</p>
-          </div>
-          <button className="btn btn-secondary" onClick={onRefresh}>
-            <RefreshCw size={16} />
-            <span>Refresh</span>
-          </button>
-        </header>
-
-        {adminMessage && <div className="alert">{adminMessage}</div>}
-
-        <section className="stats-grid">
-          <div className="stat-card">
-            <span>Total Orders</span>
-            <strong>{orders.length}</strong>
-          </div>
-          <div className="stat-card">
-            <span>Active Services</span>
-            <strong>{services.length}</strong>
-          </div>
-          <div className="stat-card">
-            <span>Admin Wallet</span>
-            <strong>{money(balance)}</strong>
-          </div>
-          <div className="stat-card">
-            <span>Role</span>
-            <strong>ADMIN</strong>
-          </div>
-        </section>
-
-        {adminTab === "overview" && (
-          <section className="card">
-            <h2>Recent Orders Management</h2>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Service</th>
-                    <th>Quantity</th>
-                    <th>Amount</th>
-                    <th>Status</th>
-                    <th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.length === 0 ? (
-                    <tr>
-                      <td colSpan="6">No orders found.</td>
-                    </tr>
-                  ) : (
-                    orders.map((ord) => (
-                      <tr key={ord.id}>
-                        <td>#{ord.id}</td>
-                        <td>{ord.service_name || `Service #${ord.service_id}`}</td>
-                        <td>{ord.quantity}</td>
-                        <td>{money(ord.amount)}</td>
-                        <td>{ord.status}</td>
-                        <td>
-                          <select
-                            value={ord.status || "pending"}
-                            onChange={(e) => handleOrderStatusChange(ord.id, e.target.value)}
-                          >
-                            <option value="pending">pending</option>
-                            <option value="processing">processing</option>
-                            <option value="completed">completed</option>
-                            <option value="partial">partial</option>
-                            <option value="cancelled">cancelled</option>
-                            <option value="failed">failed</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-
-        {adminTab === "orders" && (
-          <section className="card">
-            <h2>All Platform Orders</h2>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>User</th>
-                    <th>Target</th>
-                    <th>Quantity</th>
-                    <th>Amount</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.length === 0 ? (
-                    <tr>
-                      <td colSpan="6">No orders yet.</td>
-                    </tr>
-                  ) : (
-                    orders.map((ord) => (
-                      <tr key={ord.id}>
-                        <td>#{ord.id}</td>
-                        <td>{ord.email || ord.user_email || ord.user_id || "-"}</td>
-                        <td>{ord.target_url || ord.target || "-"}</td>
-                        <td>{ord.quantity}</td>
-                        <td>{money(ord.amount)}</td>
-                        <td>{ord.status}</td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-
-        {adminTab === "users" && (
-          <section className="card">
-            <h2>Registered Users</h2>
-            {loadingAdmin ? (
-              <p>Loading users...</p>
-            ) : (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Name</th>
-                      <th>Email</th>
-                      <th>Role</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {usersList.length === 0 ? (
-                      <tr>
-                        <td colSpan="4">
-                          {user?.email} ({normalizeRole(user?.role).toUpperCase()})
-                        </td>
-                      </tr>
-                    ) : (
-                      usersList.map((u) => (
-                        <tr key={u.id || u.email}>
-                          <td>{u.id || "-"}</td>
-                          <td>{getUserLabel(u)}</td>
-                          <td>{u.email}</td>
-                          <td>{normalizeRole(u.role)}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-        )}
-
-        {adminTab === "services" && (
-          <section className="card">
-            <h2>Available Services</h2>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Name</th>
-                    <th>Category</th>
-                    <th>Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {services.map((srv) => (
-                    <tr key={srv.id}>
-                      <td>#{srv.id}</td>
-                      <td>{srv.name}</td>
-                      <td>{srv.category}</td>
-                      <td>{money(srv.price ?? srv.unit_price)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-      </main>
+        </form>
+      </div>
     </div>
   );
 }
 
-function UserDashboard({
-  user,
-  token,
-  activeTab,
-  setActiveTab,
-  menuOpen,
-  setMenuOpen,
-  services,
-  orders,
-  balance,
-  onRefresh,
-  onLogout,
-}) {
-  const [serviceId, setServiceId] = useState(services[0]?.id || 1);
-  const [target, setTarget] = useState("");
-  const [quantity, setQuantity] = useState(services[0]?.min_quantity || 1);
+function UserDashboard({ user, services, orders, balance, api, token, onOrderPlaced }) {
+  const [selectedServiceId, setSelectedServiceId] = useState('');
+  const [targetUrl, setTargetUrl] = useState('');
+  const [quantity, setQuantity] = useState('100');
   const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState("");
-  const [errorMsg, setErrorMsg] = useState("");
 
-  useEffect(() => {
-    if (services.length > 0 && !services.some((s) => Number(s.id) === Number(serviceId))) {
-      setServiceId(services[0].id);
-      setQuantity(services[0].min_quantity || 1);
-    }
-  }, [services, serviceId]);
+  const selectedService = services.find(s => String(s.id) === String(selectedServiceId));
+  const calculatedTotal = selectedService ? (Number(selectedService.unit_price || selectedService.price || 0) * Number(quantity)) / 1000 : 0;
 
-  const selectedService = useMemo(
-    () => services.find((s) => Number(s.id) === Number(serviceId)) || services[0],
-    [services, serviceId]
-  );
-
-  const estimatedPrice = useMemo(() => {
-    const unitPrice = Number(selectedService?.price ?? selectedService?.unit_price ?? 0);
-    const qty = Number(quantity || 0);
-    return unitPrice * qty;
-  }, [selectedService, quantity]);
-
-  async function placeOrder(e) {
+  const handleSubmitOrder = async (e) => {
     e.preventDefault();
-    setFeedback("");
-    setErrorMsg("");
-
-    const minQty = Number(selectedService?.min_quantity || 1);
-    const maxQty = Number(selectedService?.max_quantity || 100000);
-    const qty = Number(quantity);
-
-    if (!target.trim()) {
-      setErrorMsg("Please enter a valid target link or handle.");
-      return;
-    }
-    if (Number.isNaN(qty) || qty < minQty || qty > maxQty) {
-      setErrorMsg(`Quantity must be between ${minQty} and ${maxQty}.`);
-      return;
-    }
-
+    if (!selectedServiceId || !targetUrl.trim()) return alert('Please fill all fields');
     setSubmitting(true);
     try {
-      await apiFetch("/api/orders", {
-        token,
-        options: {
-          method: "POST",
-          body: JSON.stringify({
-            serviceId: Number(selectedService.id),
-            targetUrl: target.trim(),
-            target: target.trim(),
-            quantity: qty,
-          }),
-        },
+      const res = await fetch(`${api}/api/orders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ serviceId: selectedServiceId, targetUrl: targetUrl.trim(), quantity: Number(quantity) })
       });
-      setTarget("");
-      setFeedback("Order placed successfully!");
-      await onRefresh();
-      setActiveTab("orders");
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to place order');
+      }
+      alert('Order placed successfully!');
+      setTargetUrl('');
+      onOrderPlaced();
     } catch (err) {
-      setErrorMsg(err.message);
+      alert(err.message);
     } finally {
       setSubmitting(false);
     }
-  }
+  };
 
   return (
-    <div className="app-shell">
-      <aside className={`sidebar ${menuOpen ? "open" : ""}`}>
-        <div className="sidebar-header">
-          <div className="brand">
-            <ArrowUpRight size={20} />
-            <span>SOHEL MEDIA PANEL</span>
-          </div>
-          <button className="icon-btn mobile-only" onClick={() => setMenuOpen(false)}>
-            <X size={18} />
-          </button>
+    <div className="dashboard-grid">
+      <div className="stat-card user-bg">
+        <h2>Customer Overview</h2>
+        <p>Welcome back, {user?.displayName}. Place orders and track your progress below.</p>
+        <div className="stats-row">
+          <div><strong>₹{balance.toFixed(2)}</strong><span>Available Balance</span></div>
+          <div><strong>{orders.length}</strong><span>Your Orders</span></div>
         </div>
+      </div>
 
-        <nav className="nav-list">
-          {navItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                className={`nav-item ${activeTab === item.id ? "active" : ""}`}
-                onClick={() => {
-                  setActiveTab(item.id);
-                  setMenuOpen(false);
-                }}
-              >
-                <Icon size={18} />
-                <span>{item.label}</span>
-              </button>
-            );
-          })}
-        </nav>
-
-        <div className="sidebar-footer">
-          <div className="user-chip">
-            <strong>{getUserLabel(user)}</strong>
-            <span>Balance: {money(balance)}</span>
+      <div className="order-form-container">
+        <h3>Place an Order</h3>
+        <form onSubmit={handleSubmitOrder}>
+          <label>
+            <span>Choose Service</span>
+            <select value={selectedServiceId} onChange={(e) => setSelectedServiceId(e.target.value)} required>
+              <option value="">Select a service...</option>
+              {services.map(s => (
+                <option key={s.id} value={s.id}>{s.name} - ₹{s.unit_price || s.price} per 1,000</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Post / Profile URL</span>
+            <input type="url" placeholder="https://example.com/link" value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} required />
+          </label>
+          <label>
+            <span>Quantity</span>
+            <input type="number" min="10" placeholder="100" value={quantity} onChange={(e) => setQuantity(e.target.value)} required />
+          </label>
+          <div className="price-preview">
+            <span>Estimated Total:</span>
+            <strong>₹{calculatedTotal.toFixed(2)}</strong>
           </div>
-          <button className="btn btn-ghost" onClick={onLogout}>
-            <LogOut size={16} />
-            <span>Logout</span>
+          <button type="submit" disabled={submitting} className="btn primary-bg">
+            {submitting ? 'Submitting...' : 'Submit Order'}
           </button>
-        </div>
-      </aside>
-
-      <main className="main-content">
-        <header className="topbar">
-          <button className="icon-btn mobile-only" onClick={() => setMenuOpen(true)}>
-            <Menu size={20} />
-          </button>
-          <div>
-            <h1>User Dashboard</h1>
-            <p>Welcome, {getUserLabel(user)}</p>
-          </div>
-          <div className="balance-pill">Balance: {money(balance)}</div>
-        </header>
-
-        {feedback && <div className="alert success">{feedback}</div>}
-        {errorMsg && <div className="ale
+        </form>
+      </div>
+    </div>
+  );
+}
